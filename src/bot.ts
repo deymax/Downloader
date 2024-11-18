@@ -17,20 +17,25 @@ bot.onText(/\/start/, (msg) => {
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
-    const url = msg.text?.trim() || '';
+    const text = msg.text?.trim() || '';
 
-    if (url.includes('youtube.com/shorts') || url.includes('youtu.be/')
-        || url.includes('instagram.com/reel/') || url.includes('instagram.com/p/') || url.includes('tiktok.com/')) {
+    if (text.startsWith('/')) {
+        return;
+    }
 
-        // Generate a unique file path using chatId and timestamp
+    if (text.includes('youtube.com/shorts') || text.includes('youtu.be/')
+        || text.includes('instagram.com/reel/') || text.includes('instagram.com/p/') || text.includes('tiktok.com/')) {
+
         const timestamp = Date.now();
         const videoFilePath = path.join(__dirname, `video_${chatId}_${timestamp}.mp4`);
         const ytDlpWrap = new YTDlpWrap();
 
+        const waitingMessage = await bot.sendMessage(chatId, 'Video is being downloaded, please wait...');
+
         try {
-            console.log(`Downloading video from URL: ${url}`);
+            console.log(`Downloading video from URL: ${text}`);
             await ytDlpWrap.execPromise([
-                url,
+                text,
                 '-f', 'best',
                 '-o', videoFilePath
             ]);
@@ -42,13 +47,14 @@ bot.on('message', async (msg) => {
                 return;
             }
 
+            await bot.deleteMessage(chatId, waitingMessage.message_id);
+
             console.log('Download completed, sending the video...');
             await bot.sendVideo(chatId, videoFilePath);
         } catch (error) {
             console.error('Error while processing the video:', error);
             bot.sendMessage(chatId, 'An error occurred while processing your request. Please try again later.');
         } finally {
-            // Ensure the file is deleted after processing
             if (fs.existsSync(videoFilePath)) {
                 fs.unlinkSync(videoFilePath);
                 console.log(`Temporary file ${videoFilePath} deleted.`);
