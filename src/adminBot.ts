@@ -1,6 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
-import { addUserToRedis, getAllUsersFromRedis, getUserFromRedis, redis } from "./utils/redis"
+import { activateAdmin, activateUser, addAdminToRedis, addUserToRedis, deactivateAdmin, deactivateUser, getAdminFromRedis, getAllAdminsFromRedis, getAllUsersFromRedis, getUserFromRedis, redis } from "./utils/redis"
+import { get } from 'http';
 
 dotenv.config();
 
@@ -31,31 +32,67 @@ adminBot.on('callback_query', async (query) => {
 });
 
 adminBot.on('message', async (msg) => {
-  if (msg.chat.id === ADMIN_CHAT_ID) {
+  let admin = await getAdminFromRedis(msg.chat.id);
+  if (!admin) {
+    admin = {
+      id: msg.chat.id,
+      username: msg.chat?.username,
+      firstName: msg.chat?.first_name,
+      lastName: msg.chat?.last_name,
+      isVerified: false,
+    };
+    await addAdminToRedis(admin);
+  }
+  if (!admin.isVerified && msg.text === '/800396aef472dabcf9d14d6af4e04b9c') {
+    await addAdminToRedis({...admin, isVerified: true});
+    await adminBot.sendMessage(admin.id, `Admin ${msg.chat?.username} has been added.`);
+  }
+  if (admin.isVerified) {
     if (msg.text === '/start') {
-      await adminBot.sendMessage(ADMIN_CHAT_ID, 'Welcome to the admin bot!');
+      await adminBot.sendMessage(admin.id, 'Welcome to the admin bot!');
     } else if (msg.text === '/chats') {
       const chats = await getAllUsersFromRedis();
-      await adminBot.sendMessage(ADMIN_CHAT_ID, `Activated chats: ${chats}`);
+      await adminBot.sendMessage(admin.id, `Activated chats: ${JSON.stringify(chats)}`);
+    } else if (msg.text === '/admins') {
+      const admins = await getAllAdminsFromRedis();
+      await adminBot.sendMessage(admin.id, `Activated chats: ${JSON.stringify(admins)}`);
+    } else if (msg.text?.startsWith('/deactivate ')) {
+      const id = parseInt(msg.text.split(' ')[1], 10);
+      const user = await getUserFromRedis(id);
+      if (user) {
+        await deactivateUser(id);
+        await adminBot.sendMessage(admin.id, `Chat ${id} has been deactivated.`);
+      }
+      const other_admin = await getAdminFromRedis(id);
+      if (other_admin) {
+        await deactivateAdmin(id);
+        await adminBot.sendMessage(admin.id, `Admin ${id} has been deactivated.`);
+      }
+    } else if (msg.text?.startsWith('/activate ')) {
+      const id = parseInt(msg.text.split(' ')[1], 10);
+      const user = await getUserFromRedis(id);
+      if (user) {
+        await activateUser(id);
+        await adminBot.sendMessage(admin.id, `Chat ${id} has been activated.`);
+      }
+      const other_admin = await getAdminFromRedis(id);
+      if (other_admin) {
+        await activateAdmin(id);
+        await adminBot.sendMessage(admin.id, `Admin ${id} has been activated.`);
+      }
     }
   }
 });
 
-adminBot.on('new_chat_members', async (msg) => {
-  if (msg.chat.id === ADMIN_CHAT_ID && msg.new_chat_members) {
-    const newMember = msg.new_chat_members[0];
-    await adminBot.sendMessage(ADMIN_CHAT_ID, `New member joined: ${newMember.username}`);
-  }
-});
+export const notifyAdmin = async (chatId: number, username?: string) => {
+  console.log("Notify admin");
 
-adminBot.on('left_chat_member', async (msg) => {
-  if (msg.chat.id === ADMIN_CHAT_ID && msg.left_chat_member) {
-    const leftMember = msg.left_chat_member;
-    await adminBot.sendMessage(ADMIN_CHAT_ID, `Member left: ${leftMember.username}`);
-  }
-});
 
-export const notifyAdmin = async (chatId: number, username: string) => {
+  const user = await getUserFromRedis(chatId);
+  if (user && user.isVerified) {
+    return;
+  }
+
   const inlineKeyboard = {
     inline_keyboard: [
       [
@@ -65,11 +102,19 @@ export const notifyAdmin = async (chatId: number, username: string) => {
     ],
   };
 
-  await adminBot.sendMessage(
-    ADMIN_CHAT_ID,
-    `Chat ID: ${chatId}\nUsername: @${username}\nDo you want to activate this chat?`,
-    { reply_markup: inlineKeyboard }
-  );
+  const admins = await getAllAdminsFromRedis();
+  console.log(admins);
+  for (const admin of admins) {
+    if (admin.isVerified) {
+      await adminBot.sendMessage(
+        admin?.id || 0,
+        `Chat ID: ${chatId}\nUsername: ${username ? '@'+username : 'Unknown'}\nDo you want to activate this chat?`,
+        { reply_markup: inlineKeyboard }
+      );
+    }
+  }
+
+  
 };
 
 export { adminBot };

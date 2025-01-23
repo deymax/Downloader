@@ -45,9 +45,9 @@ const processVideo = async (chatId: number, text: string) => {
 };
 
 const inizializeUser = async (msg: any) => {
-    const userFromRedis = getUserFromRedis(msg.from?.id as number);
-    if (!userFromRedis) {
-        return;
+    const userFromRedis = await getUserFromRedis(msg.from?.id as number);
+    if (userFromRedis) {
+        return false;
     }
     const user = {
         id: msg.from?.id,
@@ -57,27 +57,31 @@ const inizializeUser = async (msg: any) => {
         isVerified: false,
     }
     await addUserToRedis(user);
+    return true;
 }
 
 bot.onText(/\/start/, async (msg) => {
-    await inizializeUser(msg);
+    const chatId = msg.chat.id;
+    await bot.sendMessage(
+        chatId,
+        'I can download videos from YouTube, Instagram Reels, and TikTok. Use me directly by sending a link or mention me in any other chat using inline mode (@ClipStoreBot).'
+    );
+    const isCreated = await inizializeUser(msg);
+    if (isCreated) {
+        await notifyAdmin(chatId, msg.from?.username);
+    }
 })
 
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text?.trim() || '';
     const user = await getUserFromRedis(chatId);
-    if (!user || !user.isVerified) {
-        await inizializeUser(msg);
-        notifyAdmin(chatId, msg.from?.username || 'Unknown');
-        await bot.sendMessage(chatId, 'This bot is not activated for your chat. Please wait for activation.');
+    if (text.startsWith('/')) {
         return;
     }
-    if (msg.text?.startsWith('/start')) {
-        await bot.sendMessage(
-            chatId,
-            'I can download videos from YouTube, Instagram Reels, and TikTok. Use me directly by sending a link or mention me in any other chat using inline mode (@ClipStoreBot).'
-        );
+    if (!user || !user.isVerified) {
+        await inizializeUser(msg);
+        await bot.sendMessage(chatId, 'This bot is not activated for your chat. Please wait for activation.');
         return;
     }
     if (isValidLink(text)) {
@@ -92,7 +96,6 @@ bot.on('inline_query', async (query) => {
     const text = query.query.trim();
     const user = await getUserFromRedis(chatId);
     if (!user || !user.isVerified) {
-        notifyAdmin(chatId, query.from.username || 'Unknown');
         return bot.answerInlineQuery(query.id, [
             {
                 type: 'article',
@@ -172,3 +175,5 @@ bot.on('inline_query', async (query) => {
         ]);
     }
 });
+
+console.log('Bot started');
