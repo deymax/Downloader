@@ -1,7 +1,9 @@
 import Redis from 'ioredis';
-import { Admin, User } from '../types';
+import { Admin, Group, User } from '../types';
 
 export const redis = new Redis();
+
+// ----------------------------User----------------------------
 
 export const addUserToRedis = async (user: User) => {
     await redis.set(`user:${user.id}`, JSON.stringify(user));
@@ -48,6 +50,56 @@ export const deactivateUser = async (userId: number) => {
         await addUserToRedis({...user, isVerified: false});
     }
 }
+
+// ----------------------------Group----------------------------
+
+export const addGroupToRedis = async (group: Group) => {
+    await redis.set(`group:${group.id}`, JSON.stringify(group));
+}
+
+export const getGroupFromRedis = async (groupId: number) => {
+    const group = await redis.get(`group:${groupId}`);
+    return group ? JSON.parse(group) : null;
+}
+
+export const getAllGroupsFromRedis = async (): Promise<Group[]> => {
+    const groupKeys = await redis.keys('group:*');
+    const groups: Group[] = [];
+
+    for (const key of groupKeys) {
+        const groupData = await redis.get(key);
+        if (groupData) {
+            try {
+                const group: Group = JSON.parse(groupData);
+                groups.push(group);
+            } catch (error) {
+                console.error(`Failed to parse data for key ${key}:`, error);
+            }
+        }
+    }
+
+    return groups;
+};
+
+export const removeGroupFromRedis = async (groupId: number) => {
+    await redis.del(`group:${groupId}`);
+}
+
+export const activateGroup = async (groupId: number) => {
+    const group = await getGroupFromRedis(groupId);
+    if (group) {
+        await addGroupToRedis({...group, isVerified: true});
+    }
+}
+
+export const deactivateGroup = async (groupId: number) => {
+    const group = await getGroupFromRedis(groupId);
+    if (group) {
+        await addGroupToRedis({...group, isVerified: false});
+    }
+}
+
+// ----------------------------Admin----------------------------
 
 export const addAdminToRedis = async (admin: Admin) => {
     await redis.set(`admin:${admin.id}`, JSON.stringify(admin));

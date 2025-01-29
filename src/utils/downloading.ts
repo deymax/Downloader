@@ -88,7 +88,7 @@ export const downloadVideo = async (url: string, outputFilePath: string): Promis
         const buffer = await response.arrayBuffer();
         fs.writeFileSync(outputFilePath, Buffer.from(buffer));
     } catch (error: any) {
-        throw new Error(`Download failed: ${error.message}`);
+        throw new Error(`Url: ${url}\nDownload failed: ${error.message}`);
     }
 }
 

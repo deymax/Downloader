@@ -1,33 +1,65 @@
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
-import { activateAdmin, activateUser, addAdminToRedis, addUserToRedis, deactivateAdmin, deactivateUser, getAdminFromRedis, getAllAdminsFromRedis, getAllUsersFromRedis, getUserFromRedis, redis } from "./utils/redis"
-import { get } from 'http';
+import { activateAdmin, activateUser, addAdminToRedis, addGroupToRedis, addUserToRedis, deactivateAdmin, deactivateUser, getAdminFromRedis, getAllAdminsFromRedis, getAllUsersFromRedis, getGroupFromRedis, getUserFromRedis, redis } from "./utils/redis"
 
 dotenv.config();
 
 const adminBot = new TelegramBot(process.env.ADMIN_BOT_TOKEN as string, { polling: true });
-const ADMIN_CHAT_ID = parseInt(process.env.ADMIN_CHAT_ID || '0', 10);
+
+adminBot.setMyCommands([
+  { command: "chats", description: "Display all users" },
+  { command: "admins", description: "Display all admins" },
+  { command: "activate", description: "Activate user by id" },
+  { command: "deactivate", description: "Activate user by id" },
+]);
+
 
 adminBot.on('callback_query', async (query) => {
   const data = query.data || '';
-  const chatId = parseInt(data.split('_')[1], 10);
+  console.log(data)
+  const chatId = parseInt(data.split('_')[2], 10);
 
-  const user = await getUserFromRedis(chatId);
-  if (!user) {
+  const isUser = data.includes('user');
+  const isGroup = data.includes('group');
+
+  let entity;
+
+  if (isUser) {
+    entity = await getUserFromRedis(chatId);
+  } else if (isGroup) {
+    entity = await getGroupFromRedis(chatId);
+  }
+
+  if (!entity) {
     return;
   }
 
   if (data.startsWith('activate')) {
-    await addUserToRedis({...user, isVerified: true});
-    await adminBot.editMessageText(`Chat ${chatId} has been activated.`, {
-      chat_id: query.message?.chat.id,
-      message_id: query.message?.message_id,
-    });
+    if (isUser) {
+      await addUserToRedis({...entity, isVerified: true});
+      await adminBot.editMessageText(`User ${chatId} has been activated.`, {
+        chat_id: query.message?.chat.id,
+        message_id: query.message?.message_id,
+      });
+    } else if (isGroup) {
+      await addGroupToRedis({...entity, isVerified: true});
+      await adminBot.editMessageText(`Group ${chatId} has been activated.`, {
+        chat_id: query.message?.chat.id,
+        message_id: query.message?.message_id,
+      });
+    }
   } else if (data.startsWith('reject')) {
-    await adminBot.editMessageText(`Chat ${chatId} has been rejected.`, {
-      chat_id: query.message?.chat.id,
-      message_id: query.message?.message_id,
-    });
+    if (isUser) {
+      await adminBot.editMessageText(`User ${chatId} has been rejected.`, {
+        chat_id: query.message?.chat.id,
+        message_id: query.message?.message_id,
+      });
+    } else if (isGroup) {
+      await adminBot.editMessageText(`Group ${chatId} has been rejected.`, {
+        chat_id: query.message?.chat.id,
+        message_id: query.message?.message_id,
+      });
+    }
   }
 });
 
@@ -47,74 +79,85 @@ adminBot.on('message', async (msg) => {
     await addAdminToRedis({...admin, isVerified: true});
     await adminBot.sendMessage(admin.id, `Admin ${msg.chat?.username} has been added.`);
   }
-  if (admin.isVerified) {
-    if (msg.text === '/start') {
-      await adminBot.sendMessage(admin.id, 'Welcome to the admin bot!');
-    } else if (msg.text === '/chats') {
-      const chats = await getAllUsersFromRedis();
-      await adminBot.sendMessage(admin.id, `Activated chats: ${JSON.stringify(chats)}`);
-    } else if (msg.text === '/admins') {
-      const admins = await getAllAdminsFromRedis();
-      await adminBot.sendMessage(admin.id, `Activated chats: ${JSON.stringify(admins)}`);
-    } else if (msg.text?.startsWith('/deactivate ')) {
-      const id = parseInt(msg.text.split(' ')[1], 10);
+});
+
+adminBot.onText(/\/chats/, async (msg) => {
+  let admin = await getAdminFromRedis(msg.chat.id);
+  if (admin?.isVerified) {
+    const chats = await getAllUsersFromRedis();
+    await adminBot.sendMessage(admin.id, `Activated chats: ${JSON.stringify(chats)}`);
+  }
+});
+
+adminBot.onText(/\/admins/, async (msg) => {
+  let admin = await getAdminFromRedis(msg.chat.id);
+  if (admin?.isVerified) {
+    const admins = await getAllAdminsFromRedis();
+    await adminBot.sendMessage(admin.id, `Activated admins: ${JSON.stringify(admins)}`);
+  }
+});
+
+adminBot.onText(/\/deactivate (\d+)/, async (msg, match) => {
+  if (match) {
+    const id = parseInt(match[1], 10);
+    let admin = await getAdminFromRedis(msg.chat.id);
+    if (admin?.isVerified) {
       const user = await getUserFromRedis(id);
       if (user) {
         await deactivateUser(id);
         await adminBot.sendMessage(admin.id, `Chat ${id} has been deactivated.`);
       }
-      const other_admin = await getAdminFromRedis(id);
-      if (other_admin) {
-        await deactivateAdmin(id);
-        await adminBot.sendMessage(admin.id, `Admin ${id} has been deactivated.`);
-      }
-    } else if (msg.text?.startsWith('/activate ')) {
-      const id = parseInt(msg.text.split(' ')[1], 10);
+    }
+  }
+});
+
+adminBot.onText(/\/activate (\d+)/, async (msg, match) => {
+  if (match) {
+    const id = parseInt(match[1], 10);
+    let admin = await getAdminFromRedis(msg.chat.id);
+    if (admin?.isVerified) {
       const user = await getUserFromRedis(id);
       if (user) {
         await activateUser(id);
         await adminBot.sendMessage(admin.id, `Chat ${id} has been activated.`);
       }
-      const other_admin = await getAdminFromRedis(id);
-      if (other_admin) {
-        await activateAdmin(id);
-        await adminBot.sendMessage(admin.id, `Admin ${id} has been activated.`);
-      }
     }
   }
 });
 
-export const notifyAdmin = async (chatId: number, username?: string) => {
-  console.log("Notify admin");
 
+export const notifyAdmin = async (chatId: number, username?: string, isGroup: boolean = false) => {
+  let entity = null;
+  
+  if (isGroup) {
+    entity = await getGroupFromRedis(chatId);
+  } else {
+    entity = await getUserFromRedis(chatId);
+  }
 
-  const user = await getUserFromRedis(chatId);
-  if (user && user.isVerified) {
+  if (entity && entity.isVerified) {
     return;
   }
 
   const inlineKeyboard = {
     inline_keyboard: [
       [
-        { text: 'Activate', callback_data: `activate_${chatId}` },
-        { text: 'Reject', callback_data: `reject_${chatId}` },
+        { text: 'Activate', callback_data: `${isGroup ? 'activate_group' : 'activate_user'}_${chatId}` },
+        { text: 'Reject', callback_data: `${isGroup ? 'reject_group' : 'reject_user'}_${chatId}` },
       ],
     ],
   };
 
   const admins = await getAllAdminsFromRedis();
-  console.log(admins);
   for (const admin of admins) {
     if (admin.isVerified) {
       await adminBot.sendMessage(
         admin?.id || 0,
-        `Chat ID: ${chatId}\nUsername: ${username ? '@'+username : 'Unknown'}\nDo you want to activate this chat?`,
+        `${isGroup ? 'Group' : 'User'} Chat ID: ${chatId}\nUsername: ${username ? '@' + username : 'Unknown'}\nDo you want to activate this ${isGroup ? 'group' : 'user'}?`,
         { reply_markup: inlineKeyboard }
       );
     }
   }
-
-  
 };
 
 export { adminBot };
