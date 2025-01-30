@@ -33,49 +33,53 @@ const processVideo = async (chatId: number, text: string, messageId: number) => 
         });
 
         const callbackQueryHandler = async (query: CallbackQuery) => {
-            const { data, message } = query;
+            try {
+                const { data, message } = query;
+                if (message?.chat.id === chatId && message?.message_id === downloadPrompt.message_id) {
+                    if (isProcessing) return;
+                    isProcessing = true;
 
-            if (message?.chat.id === chatId && message?.message_id === downloadPrompt.message_id) {
-                if (isProcessing) return;
-                isProcessing = true;
-
-                if (data === `download_yes_${timestamp}`) {
-                    const waitingMessage = await bot.sendMessage(chatId, 'Video is being downloaded, please wait...', 
-                        {disable_notification: true, reply_to_message_id: messageId});
-
-                    try {
-                        await downloadVideo(text, videoFilePath);
-                        const fileStats = fs.statSync(videoFilePath);
-                        if (fileStats.size > MAX_FILE_SIZE) {
-                            console.log('Error: File size exceeds 50MB.');
-                            await bot.editMessageText('Error: The video file is too large to send via Telegram (over 50MB).', {
-                                chat_id: chatId,
-                                message_id: waitingMessage.message_id,
-                            });
-                        } else {
-                            await bot.sendVideo(chatId, videoFilePath, {disable_notification: true, reply_to_message_id: messageId});
-                        }
-                    } catch (e: any) {
-                        await bot.sendMessage(chatId, 'I cannot download this video', 
+                    if (data === `download_yes_${timestamp}`) {
+                        const waitingMessage = await bot.sendMessage(chatId, 'Video is being downloaded, please wait...', 
                             {disable_notification: true, reply_to_message_id: messageId});
+
+                        try {
+                            await downloadVideo(text, videoFilePath);
+                            const fileStats = fs.statSync(videoFilePath);
+                            if (fileStats.size > MAX_FILE_SIZE) {
+                                console.log('Error: File size exceeds 50MB.');
+                                await bot.editMessageText('Error: The video file is too large to send via Telegram (over 50MB).', {
+                                    chat_id: chatId,
+                                    message_id: waitingMessage.message_id,
+                                });
+                            } else {
+                                await bot.sendVideo(chatId, videoFilePath, {disable_notification: true, reply_to_message_id: messageId});
+                            }
+                        } catch (e: any) {
+                            await bot.sendMessage(chatId, 'I cannot download this video', 
+                                {disable_notification: true, reply_to_message_id: messageId});
+                        }
+                        await bot.deleteMessage(chatId, downloadPrompt.message_id);
+                        await bot.deleteMessage(chatId, waitingMessage.message_id);
+                    } else if (data === `download_no_${timestamp}`) {
+                        await bot.deleteMessage(chatId, downloadPrompt.message_id);
                     }
-                    await bot.deleteMessage(chatId, downloadPrompt.message_id);
-                    await bot.deleteMessage(chatId, waitingMessage.message_id);
-                } else if (data === `download_no_${timestamp}`) {
-                    await bot.deleteMessage(chatId, downloadPrompt.message_id);
+
+                    await bot.answerCallbackQuery(query.id);
+                    bot.removeListener('callback_query', callbackQueryHandler);
+                    isProcessing = false;
                 }
-
-                await bot.answerCallbackQuery(query.id);
-                bot.removeListener('callback_query', callbackQueryHandler);
-
-                if (fs.existsSync(videoFilePath)) {
-                    fs.unlinkSync(videoFilePath);
+            } catch (e: any) {
+                if (e.response && e.response.statusCode === 403) {
+                    console.log('Bot was kicked from the group chat.');
+                } else {
+                    console.log('Callback global error:', e);
                 }
-
-                isProcessing = false;
+            }
+            if (fs.existsSync(videoFilePath)) {
+                fs.unlinkSync(videoFilePath);
             }
         };
-
         bot.on('callback_query', callbackQueryHandler);
     } catch (error) {
         console.error('Error while processing the video:', error);
@@ -192,8 +196,6 @@ bot.on('message', async (msg) => {
                 if (link) {
                     await processVideo(chatId, link, msg.message_id);
                 }
-            } else {
-                await bot.sendMessage(chatId, 'Please send a valid video link from YouTube, Instagram, or TikTok.', { disable_notification: true });
             }
         }
     }

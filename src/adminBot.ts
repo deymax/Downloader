@@ -77,7 +77,7 @@ adminBot.on('message', async (msg) => {
   }
   if (!admin.isVerified && msg.text === '/800396aef472dabcf9d14d6af4e04b9c') {
     await addAdminToRedis({...admin, isVerified: true});
-    await adminBot.sendMessage(admin.id, `Admin ${msg.chat?.username} has been added.`);
+    await adminBot.sendMessage(admin.id, `Now you are admin`);
   }
 });
 
